@@ -1,0 +1,12 @@
+bin/
+obj/
+*.user
+.vs/
+appsettings.Development.json
+
+# Serilog rolling file output
+Logs/
+**/Logs/
+appsettings.Production.json
+wwwroot/uploads/*
+!wwwroot/uploads/.gitkeep
