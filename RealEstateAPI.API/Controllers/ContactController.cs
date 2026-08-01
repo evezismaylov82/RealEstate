@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using RealEstateAPI.Domain.Entities;
 using RealEstateAPI.Domain.Interfaces.Repositories;
 using RealEstateAPI.Infrastructure.Services;
@@ -14,20 +15,27 @@ namespace RealEstateAPI.API.Controllers
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly IEmailService _emailService;
+        private readonly ILogger<ContactController> _logger;
 
-        public ContactController(IUnitOfWork unitOfWork, IEmailService emailService)
+        public ContactController(
+            IUnitOfWork unitOfWork,
+            IEmailService emailService,
+            ILogger<ContactController> logger)
         {
             _unitOfWork = unitOfWork;
             _emailService = emailService;
+            _logger = logger;
         }
 
         [HttpPost]
         public async Task<IActionResult> SendContactMessage([FromBody] ContactMessageDto dto)
         {
+            _logger.LogInformation("SendContactMessage request received from Email: {Email}.", dto?.Email);
             try
             {
                 if (!ModelState.IsValid)
                 {
+                    _logger.LogWarning("SendContactMessage failed due to invalid ModelState for Email: {Email}.", dto?.Email);
                     return BadRequest(ModelState);
                 }
 
@@ -52,6 +60,8 @@ namespace RealEstateAPI.API.Controllers
                 await _unitOfWork.ContactMessages.AddAsync(message);
                 await _unitOfWork.SaveChangesAsync();
 
+                _logger.LogInformation("Contact message created with Id: {MessageId} for PropertyId: {PropertyId}.", message.Id, dto.PropertyId);
+
                 try
                 {
                     await _emailService.SendContactMessageNotificationAsync(
@@ -60,9 +70,11 @@ namespace RealEstateAPI.API.Controllers
                         dto.Email,
                         dto.Message
                     );
+                    _logger.LogInformation("Contact notification email sent to admin for MessageId: {MessageId}.", message.Id);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    _logger.LogError(ex, "Failed to send contact notification email for MessageId: {MessageId}.", message.Id);
                 }
 
                 return Ok(new
@@ -74,6 +86,7 @@ namespace RealEstateAPI.API.Controllers
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "Error occurred in SendContactMessage for Email: {Email}.", dto?.Email);
                 return StatusCode(500, new { message = "Error sending message", error = ex.Message });
             }
         }
@@ -82,19 +95,23 @@ namespace RealEstateAPI.API.Controllers
         [HttpGet("my-messages")]
         public async Task<IActionResult> GetMyMessages()
         {
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            _logger.LogInformation("GetMyMessages request received.");
             try
             {
-                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
                 {
+                    _logger.LogWarning("GetMyMessages failed. Invalid token claim.");
                     return Unauthorized(new { message = "Invalid token" });
                 }
 
                 var messages = await _unitOfWork.ContactMessages.GetMessagesByUserIdAsync(userId);
+                _logger.LogInformation("Successfully retrieved contact messages for UserId: {UserId}.", userId);
                 return Ok(messages);
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "Error occurred in GetMyMessages.");
                 return StatusCode(500, new { message = "Error retrieving messages", error = ex.Message });
             }
         }
@@ -103,13 +120,16 @@ namespace RealEstateAPI.API.Controllers
         [HttpGet("unread")]
         public async Task<IActionResult> GetUnreadMessages()
         {
+            _logger.LogInformation("GetUnreadMessages request received by Admin.");
             try
             {
                 var messages = await _unitOfWork.ContactMessages.GetUnreadMessageAsync();
+                _logger.LogInformation("Successfully retrieved unread contact messages.");
                 return Ok(messages);
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "Error occurred in GetUnreadMessages.");
                 return StatusCode(500, new { message = "Error retrieving messages", error = ex.Message });
             }
         }
@@ -118,15 +138,18 @@ namespace RealEstateAPI.API.Controllers
         [HttpPut("{id}/mark-read")]
         public async Task<IActionResult> MarkAsRead(int id)
         {
+            _logger.LogInformation("MarkAsRead request received for MessageId: {MessageId}.", id);
             try
             {
                 await _unitOfWork.ContactMessages.MarkAsReadAsync(id);
                 await _unitOfWork.SaveChangesAsync();
 
+                _logger.LogInformation("Successfully marked MessageId: {MessageId} as read.", id);
                 return Ok(new { message = "Message marked as read" });
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "Error occurred in MarkAsRead for MessageId: {MessageId}.", id);
                 return StatusCode(500, new { message = "Error marking message", error = ex.Message });
             }
         }
@@ -135,16 +158,20 @@ namespace RealEstateAPI.API.Controllers
         [HttpPost("{id}/reply")]
         public async Task<IActionResult> ReplyToMessage(int id, [FromBody] ReplyMessageDto dto)
         {
+            _logger.LogInformation("ReplyToMessage request received for MessageId: {MessageId}.", id);
             try
             {
                 var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
                 {
+                    _logger.LogWarning("ReplyToMessage failed. Invalid token claim.");
                     return Unauthorized(new { message = "Invalid token" });
                 }
 
                 await _unitOfWork.ContactMessages.ReplyToMessageAsync(id, dto.ReplyMessage, userId);
                 await _unitOfWork.SaveChangesAsync();
+
+                _logger.LogInformation("Successfully saved reply for MessageId: {MessageId} by AdminId: {UserId}.", id, userId);
 
                 var message = await _unitOfWork.ContactMessages.GetByIdAsync(id);
                 if (message != null)
@@ -156,9 +183,11 @@ namespace RealEstateAPI.API.Controllers
                             $"Re: {message.Subject}",
                             dto.ReplyMessage
                         );
+                        _logger.LogInformation("Reply email sent to {Email} for MessageId: {MessageId}.", message.Email, id);
                     }
-                    catch
+                    catch (Exception ex)
                     {
+                        _logger.LogError(ex, "Failed to send reply email to {Email} for MessageId: {MessageId}.", message.Email, id);
                     }
                 }
 
@@ -166,6 +195,7 @@ namespace RealEstateAPI.API.Controllers
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "Error occurred in ReplyToMessage for MessageId: {MessageId}.", id);
                 return StatusCode(500, new { message = "Error replying to message", error = ex.Message });
             }
         }
