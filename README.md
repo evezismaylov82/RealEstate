@@ -183,3 +183,6 @@ Entity-lər arasında müxtəlif əlaqələr yaradılıb və database əlaqələ
 ## Layihənin məqsədi
 
 Bu layihənin əsas məqsədi real layihələrdə istifadə olunan backend prinsiplərini tətbiq etmək və ASP.NET Core Web API istifadə edərək tam funksional daşınmaz əmlak sistemi yaratmaqdır.
+## Project Status
+
+This project is currently under development.
